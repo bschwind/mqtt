@@ -1,9 +1,16 @@
+#![feature(try_from)]
+
+#[macro_use]
+extern crate nom;
+
 extern crate mio;
 extern crate bytes;
 
 mod mqtt_handler;
+mod parser;
 mod session;
 mod session_state;
+mod protocol;
 
 use mio::tcp::*;
 use mio::{PollOpt, EventLoop, EventSet};

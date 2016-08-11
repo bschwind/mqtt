@@ -4,5 +4,6 @@ version = "0.1.0"
 authors = ["Brian Schwind <brianmschwind@gmail.com>"]
 
 [dependencies]
-mio = "0.5.1"
 bytes = "0.3.0"
+mio = "0.5.1"
+nom = "1.2.4"

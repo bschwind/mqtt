@@ -1,9 +1,42 @@
 use std::convert::TryFrom;
-use nom::{Needed, IResult};
+use nom::{ErrorKind, Needed, IResult};
+use nom::Err;
 
-use protocol::{ControlPacketType, ControlPacketError, FixedHeader};
+use protocol::{ControlPacketType, MqttParseError, FixedHeader};
 
-pub fn remaining_length_parser(input: &[u8]) -> IResult<&[u8], Result<u32, ControlPacketError>> {
+#[derive(Clone)]
+struct FirstByteData {
+	control_type: ControlPacketType,
+	bit_0: bool,
+	bit_1: bool,
+	bit_2: bool,
+	bit_3: bool
+}
+
+fn first_byte_parser(input: &[u8]) -> IResult<&[u8], FirstByteData, MqttParseError> {
+	if input.len() < 1 {
+		IResult::Incomplete(Needed::Size(1))
+	} else {
+		let first_byte = input[0];
+
+		match ControlPacketType::try_from(((first_byte & 0b11110000) >> 4)) {
+			Ok(control_type) => {
+				IResult::Done(&input[1..], FirstByteData {
+					control_type: control_type,
+					bit_0: first_byte & 0b00001000 == 0b00001000,
+					bit_1: first_byte & 0b00000100 == 0b00000100,
+					bit_2: first_byte & 0b00000010 == 0b00000010,
+					bit_3: first_byte & 0b00000001 == 0b00000001
+				})
+			}
+			Err(e) => {
+				IResult::Error(Err::Code(ErrorKind::Custom(e)))
+			}
+		}
+	}
+}
+
+fn remaining_length_parser(input: &[u8]) -> IResult<&[u8], u32, MqttParseError> {
 	if input.len() < 1 {
 		IResult::Incomplete(Needed::Size(1))
 	} else {
@@ -19,7 +52,7 @@ pub fn remaining_length_parser(input: &[u8]) -> IResult<&[u8], Result<u32, Contr
 					encoded_byte = n;
 				}
 				None => {
-					return IResult::Incomplete(Needed::Size(1));
+					return IResult::Error(Err::Code(ErrorKind::Custom(MqttParseError::InvalidRemainingLength)));
 				}
 			}
 
@@ -29,8 +62,7 @@ pub fn remaining_length_parser(input: &[u8]) -> IResult<&[u8], Result<u32, Contr
 			multiplier *= 128;
 
 			if multiplier > (128 * 128 * 128) {
-				// return IResult::Error(Err());
-				return IResult::Done(&input[consumed_bytes..], Err(ControlPacketError::InvalidRemainingLength));
+				return IResult::Error(Err::Code(ErrorKind::Custom(MqttParseError::InvalidRemainingLength)));
 			}
 
 			if encoded_byte & 0b10000000 == 0b00000000 {
@@ -38,28 +70,24 @@ pub fn remaining_length_parser(input: &[u8]) -> IResult<&[u8], Result<u32, Contr
 			}
 		}
 
-		IResult::Done(&input[consumed_bytes..], Ok(value))
+		IResult::Done(&input[consumed_bytes..], value)
 	}
 }
 
-named!(pub fixed_header_parser(&[u8]) -> Result<FixedHeader, ControlPacketError>,
+named!(pub fixed_header_parser<&[u8], FixedHeader, MqttParseError>,
 	chain!(
-		first_byte: take!(1) ~
+		first_byte_data: first_byte_parser ~
 		remaining_length: remaining_length_parser,
 		|| {
-			let first_byte = first_byte[0];
-
-			ControlPacketType::try_from(((first_byte & 0b11110000) >> 4))
-			.map(|control_type| {
-				FixedHeader {
-					control_type: control_type,
-					bit_0: first_byte & 0b00001000 == 0b00001000,
-					bit_1: first_byte & 0b00000100 == 0b00000100,
-					bit_2: first_byte & 0b00000010 == 0b00000010,
-					bit_3: first_byte & 0b00000001 == 0b00000001,
-					remaining_length: remaining_length.unwrap_or(0)
-				}
-			})
+			FixedHeader {
+				control_type: first_byte_data.control_type.clone(),
+				// control_type: ControlPacketType::Connect,
+				bit_0: first_byte_data.bit_0,
+				bit_1: first_byte_data.bit_1,
+				bit_2: first_byte_data.bit_2,
+				bit_3: first_byte_data.bit_3,
+				remaining_length: remaining_length
+			}
 		}
 	)
 );
@@ -69,9 +97,22 @@ fn test_length() {
 	match remaining_length_parser(&[193, 2, 143, 121, 110]) {
 		IResult::Done(i, o) => {
 			assert_eq!(i, &[143, 121, 110]);
-			assert_eq!(o.unwrap(), 321)
+			assert_eq!(o, 321)
 		}
 		_ => panic!()
+	}
+}
+
+#[test]
+fn test_invalid_length() {
+	match remaining_length_parser(&[193, 255, 255]) {
+		IResult::Done(_, _) => {
+			panic!("Expected remaining_length to be invalid, but it was found to be valid")
+		}
+		IResult::Error(Err::Code(ErrorKind::Custom(e))) => {
+			assert_eq!(e, MqttParseError::InvalidRemainingLength)
+		}
+		e => panic!("{:?}", e)
 	}
 }
 
@@ -84,7 +125,7 @@ fn test_header_parser() {
 		IResult::Done(i, o) => {
 			assert_eq!(i, &[]);
 
-			assert_eq!(o.unwrap(), FixedHeader {
+			assert_eq!(o, FixedHeader {
 				control_type: ControlPacketType::Connect,
 				bit_0: false,
 				bit_1: false,

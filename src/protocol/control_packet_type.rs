@@ -1,13 +1,8 @@
 use std::convert::TryFrom;
-
-#[derive(Debug)]
-pub enum ControlPacketError {
-	InvalidControlType,
-	InvalidRemainingLength
-}
+use super::MqttParseError;
 
 // 0 and 15 are reserved
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ControlPacketType {
 	Connect = 1,
 	ConnectAck = 2,
@@ -26,9 +21,9 @@ pub enum ControlPacketType {
 }
 
 impl TryFrom<u8> for ControlPacketType {
-	type Err = ControlPacketError;
+	type Err = MqttParseError;
 
-    fn try_from(original: u8) -> Result<ControlPacketType, Self::Err> {
+    fn try_from(original: u8) -> Result<ControlPacketType, MqttParseError> {
         match original {
             1 => Ok(ControlPacketType::Connect),
             2 => Ok(ControlPacketType::ConnectAck),
@@ -44,7 +39,7 @@ impl TryFrom<u8> for ControlPacketType {
             12 => Ok(ControlPacketType::PingRequest),
             13 => Ok(ControlPacketType::PingResponse),
             14 => Ok(ControlPacketType::Disconnect),
-            _ => Err(ControlPacketError::InvalidControlType)
+            _ => Err(MqttParseError::InvalidControlType)
         }
     }	
 }
@@ -52,7 +47,7 @@ impl TryFrom<u8> for ControlPacketType {
 #[test]
 fn test_from_u8() {
 	match ControlPacketType::try_from(0) {
-		Err(ControlPacketError::InvalidControlType) => assert!(true),
+		Err(MqttParseError::InvalidControlType) => assert!(true),
 		_ => assert!(false)
 	}
 
@@ -71,9 +66,9 @@ fn test_from_u8() {
 	assert_eq!(ControlPacketType::try_from(13).unwrap(), ControlPacketType::PingResponse);
 	assert_eq!(ControlPacketType::try_from(14).unwrap(), ControlPacketType::Disconnect);
 
-	for n in 15..255 {
+	for n in 15..256 {
 		match ControlPacketType::try_from(n) {
-			Err(ControlPacketError::InvalidControlType) => assert!(true),
+			Err(MqttParseError::InvalidControlType) => assert!(true),
 			_ => assert!(false)
 		}
 	}

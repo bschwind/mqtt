@@ -4,13 +4,26 @@ use nom::Err;
 
 use protocol::{ControlPacketType, MqttParseError, FixedHeader};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct FirstByteData {
 	control_type: ControlPacketType,
 	bit_0: bool,
 	bit_1: bool,
 	bit_2: bool,
 	bit_3: bool
+}
+
+impl FixedHeader {
+	fn from_first_byte_data(first_byte: FirstByteData, remaining_length: u32) -> FixedHeader {
+		FixedHeader {
+			control_type: first_byte.control_type,
+			bit_0: first_byte.bit_0,
+			bit_1: first_byte.bit_1,
+			bit_2: first_byte.bit_2,
+			bit_3: first_byte.bit_3,
+			remaining_length: remaining_length
+		}
+	}
 }
 
 fn first_byte_parser(input: &[u8]) -> IResult<&[u8], FirstByteData, MqttParseError> {
@@ -79,18 +92,38 @@ named!(pub fixed_header_parser<&[u8], FixedHeader, MqttParseError>,
 		first_byte_data: first_byte_parser ~
 		remaining_length: remaining_length_parser,
 		|| {
-			FixedHeader {
-				control_type: first_byte_data.control_type.clone(),
-				// control_type: ControlPacketType::Connect,
-				bit_0: first_byte_data.bit_0,
-				bit_1: first_byte_data.bit_1,
-				bit_2: first_byte_data.bit_2,
-				bit_3: first_byte_data.bit_3,
-				remaining_length: remaining_length
-			}
+			FixedHeader::from_first_byte_data(first_byte_data, remaining_length)
 		}
 	)
 );
+
+#[test]
+fn test_first_byte_parser() {
+	match first_byte_parser(&[16, 2, 143, 121, 110]) {
+		IResult::Done(i, o) => {
+			assert_eq!(i, &[2, 143, 121, 110]);
+			assert_eq!(o, FirstByteData {
+				control_type: ControlPacketType::Connect,
+				bit_0: false,
+				bit_1: false,
+				bit_2: false,
+				bit_3: false
+			})
+		}
+		_ => panic!()
+	}
+}
+
+#[test]
+fn test_first_byte_parser_invalid_data() {
+	match first_byte_parser(&[0]) {
+		IResult::Done(_, _) => {
+			panic!("Expected first_byte to be invalid, but it was found to be valid")
+		}
+		IResult::Error(Err::Code(ErrorKind::Custom(e))) => assert_eq!(e, MqttParseError::InvalidControlType),
+		_ => panic!()
+	}
+}
 
 #[test]
 fn test_length() {
@@ -109,9 +142,7 @@ fn test_invalid_length() {
 		IResult::Done(_, _) => {
 			panic!("Expected remaining_length to be invalid, but it was found to be valid")
 		}
-		IResult::Error(Err::Code(ErrorKind::Custom(e))) => {
-			assert_eq!(e, MqttParseError::InvalidRemainingLength)
-		}
+		IResult::Error(Err::Code(ErrorKind::Custom(e))) => assert_eq!(e, MqttParseError::InvalidRemainingLength),
 		e => panic!("{:?}", e)
 	}
 }

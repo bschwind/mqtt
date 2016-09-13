@@ -5,5 +5,6 @@ authors = ["Brian Schwind <brianmschwind@gmail.com>"]
 
 [dependencies]
 bytes = "0.3.0"
-mio = "0.5.1"
+mio = "0.6.0"
 nom = "1.2.4"
+slab = "0.3.0"

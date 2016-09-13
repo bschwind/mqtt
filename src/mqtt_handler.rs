@@ -2,69 +2,92 @@ extern crate mio;
 
 use super::session::{Session};
 
+use std::io;
+use std::io::{ErrorKind};
+use std::result::Result;
+use std::usize;
 use mio::tcp::*;
-use mio::{PollOpt, EventLoop, EventSet, Token};
-use mio::util::Slab;
+use mio::{Event, Events, Poll, PollOpt, Ready, Token};
+use slab;
 
-pub const SERVER_TOKEN: Token = mio::Token(0);
+type Slab<T> = slab::Slab<T, Token>;
+
+pub const SERVER_TOKEN: Token = mio::Token(usize::MAX-1);
 
 pub struct MqttHandler {
-	server: TcpListener,
+	socket: TcpListener,
 	sessions: Slab<Session>
 }
 
 impl MqttHandler {
-	pub fn new(server: TcpListener) -> MqttHandler {
+	pub fn new(socket: TcpListener) -> MqttHandler {
 		MqttHandler {
-			server: server,
-			sessions: Slab::new_starting_at(Token(1), 4)
+			socket: socket,
+			sessions: Slab::with_capacity(2)
 		}
 	}
 }
 
-impl mio::Handler for MqttHandler {
-	type Timeout = ();
-	type Message = ();
+pub enum MqttError {
+	Io(io::Error),
+	TooManyConnections
+}
 
-	fn ready(&mut self, event_loop: &mut EventLoop<MqttHandler>, token: mio::Token, events: mio::EventSet) {
+impl From<io::Error> for MqttError {
+	fn from(err: io::Error) -> MqttError {
+		MqttError::Io(err)
+	}
+}
+
+impl MqttHandler {
+	fn handle_event(&mut self, poll: &mut Poll, event: Event) -> Result<(), MqttError> {
+
+		let token = event.token();
+		let event_type = event.kind();
 
 		match token {
 			SERVER_TOKEN => {
-				assert!(events.is_readable());
+				assert!(event_type.is_readable());
 				println!("The server is ready to accept a connection!");
 
-				match self.server.accept() {
-					Ok(Some((socket, addr))) => {
+				match self.socket.accept() {
+					Ok((socket, addr)) => {
 						println!("Client addr is {}", addr);
-						match self.sessions.insert_with(|token| Session::new(socket, token)) {
-							Some(client_token) => {
-								let new_connection: &Session = &self.sessions[client_token];
-								println!("Accepted a socket, token is {:?}", client_token);
 
-								match event_loop.register(&new_connection.socket, client_token, EventSet::readable(), PollOpt::level() | PollOpt::oneshot()) {
-									Ok(_) => {}
-									Err(e) => { println!("Error registering client TcpListener in event loop - {}", e) }
-								}
+						// Insert client into sessions
+						match self.sessions.vacant_entry() {
+							Some(entry) => {
+								let new_token = entry.index();
+								let new_session = Session::new(socket, new_token);
+
+								try!(MqttHandler::register_new_connection(poll, &new_session, new_token));
+
+								entry.insert(new_session).index();
 							}
 							None => {
-								// Disconnect the client here?
-								println!("I can't take any more!");
+								return Err(MqttError::TooManyConnections);
 							}
-						}
-					}
-					Ok(None) => {
-						println!("Socket would block here");
+						};
+
+						Ok(())
 					}
 					Err(e) => {
-						println!("Oh no the socket errored! - {}", e);
-						event_loop.shutdown();
+						println!("{:?}", e);
+
+						match e.kind() {
+							ErrorKind::WouldBlock => {
+								println!("Socket would block here");
+								Ok(())
+							},
+							_ => Err(MqttError::from(e))
+						}
 					}
 				}
 			}
 			_ => {
 				match self.sessions.get_mut(token) {
 					Some(connection) => {
-						connection.ready(event_loop, events);
+						try!(connection.handle_event(poll, event_type));
 					}
 					None => println!("Tried to use a token that doesn't exist in the sessions slab: {:?}", token)
 				}
@@ -84,12 +107,56 @@ impl mio::Handler for MqttHandler {
 					println!("Removing {:?} from sessions slab", token);
 					self.sessions.remove(token);
 				}
+
+				Ok(())
 			}
 		}
 	}
 
-	fn tick(&mut self, _: &mut EventLoop<MqttHandler>) {
-		println!("TICK!");
+	fn register(&mut self, poll: &mut Poll) -> io::Result<()> {
+		poll
+		.register(&self.socket, SERVER_TOKEN, Ready::readable(), PollOpt::edge())
+		.or_else(|e| {
+			println!("Failed to register server {:?}, {:?}", SERVER_TOKEN, e);
+			Err(e)
+		})
+	}
+
+	fn register_new_connection(poll: &mut Poll, new_session: &Session, new_token: Token) -> io::Result<()> {
+		let mut interest = Ready::readable();
+		interest.insert(Ready::hup());
+
+		// Register the new connection with the event loop
+		poll
+		.register(&new_session.socket, new_token, interest, PollOpt::edge() | PollOpt::oneshot())
+		.or_else(|e| {
+			println!("Failed to reregister {:?}, {:?}", new_token, e);
+			Err(e)
+		})
+	}
+
+	pub fn run(&mut self, poll: &mut Poll) -> io::Result<()> {
+		let mut events = Events::with_capacity(1024);
+
+		try!(self.register(poll));
+
+		loop {
+			try!(poll.poll(&mut events, None)); // None means no timeout
+
+			for event in &events {
+				match self.handle_event(poll, event) {
+					Ok(_) => (),
+					Err(e) => {
+						match e {
+							MqttError::Io(e) => println!("Encountered IO error: {:?}", e),
+							MqttError::TooManyConnections => println!("Too many connections for the server to handle!")
+						}
+					}
+				}
+			}
+
+			println!("Tick!");
+		}
 	}
 }
 

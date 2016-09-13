@@ -5,6 +5,7 @@ extern crate nom;
 
 extern crate mio;
 extern crate bytes;
+extern crate slab;
 
 mod mqtt_handler;
 mod parser;
@@ -13,23 +14,18 @@ mod session_state;
 mod protocol;
 
 use mio::tcp::*;
-use mio::{PollOpt, EventLoop, EventSet};
+use mio::{Poll};
 
 use mqtt_handler::MqttHandler;
 
 fn main() {
 	let port: u16 = 1883;
 	let address = format!("0.0.0.0:{}", port).parse().unwrap();
-	let server = TcpListener::bind(&address).unwrap();
+	let socket = TcpListener::bind(&address).unwrap();
 
-	let mut event_loop = EventLoop::new().unwrap();
-	event_loop
-		.register(&server, mqtt_handler::SERVER_TOKEN, EventSet::readable(), PollOpt::level())
-		.unwrap_or_else(|e| println!("Error registering TcpListener in event loop - {}", e));
+	let mut poll = Poll::new().expect("Failed to create Poll");
+	let mut server = MqttHandler::new(socket);
 
 	println!("Running MQTT server on port {}", port);
-
-	event_loop
-		.run(&mut MqttHandler::new(server))
-		.unwrap_or_else(|e| println!("Error running the event loop - {}", e));
+	server.run(&mut poll).expect("Failed to run the server");
 }

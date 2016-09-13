@@ -1,9 +1,10 @@
-use super::mqtt_handler::{MqttHandler};
 use super::session_state::{State};
 
-use mio::{TryRead, TryWrite};
+use std::io;
+use std::io::{ErrorKind, Read};
+
 use mio::tcp::*;
-use mio::{PollOpt, EventLoop, EventSet, Token};
+use mio::{Poll, PollOpt, Ready, Token};
 
 // An MQTT Session
 pub struct Session {
@@ -17,97 +18,74 @@ impl Session {
 		Session {
 			socket: socket,
 			token: token,
-			state: State::Reading(vec![])
+			state: State::Reading
 		}
 	}
 
-	pub fn ready(&mut self, event_loop: &mut EventLoop<MqttHandler>, events: EventSet) -> () {
-		println!("Session is ready for these events: {:?}", events);
+	pub fn handle_event(&mut self, poll: &mut Poll, event_type: Ready) -> io::Result<()> {
+		println!("Session is ready for these events: {:?}", event_type);
 
 		match self.state {
-			State::Reading(_) => {
-				assert!(events.is_readable());
-				self.read(event_loop);
+			State::Reading => {
+				assert!(event_type.is_readable());
+				try!(self.read(poll));
 			}
-			State::Writing(_) => {
-				assert!(events.is_writable());
-				self.write(event_loop);
+			State::Writing => {
+				assert!(event_type.is_writable());
+				self.write(poll);
 			}
 			State::Closed => {
 				println!("Session was ready for reading but is in the Closed state");
 			}
 		}
+
+		if event_type.is_hup() {
+			self.state = State::Closed;
+		}
+
+		Ok(())
 	}
 
-	fn read(&mut self, event_loop: &mut EventLoop<MqttHandler>) {
-		match self.socket.try_read_buf(self.state.get_mut_read_buf()) {
-			Ok(Some(0)) => {
-				// TODO - understand this match
-				println!("Read 0 bytes from client; buffered={}", self.state.get_read_buf().len());
-				// unimplemented!();
+	fn read(&mut self, poll: &mut Poll) -> io::Result<()> {
+		let mut buf = vec![0; 1024];
 
-				match self.state.get_read_buf().len() {
-					n if n > 0 => {
-						self.state.transition_to_writing(n);
-						self.reregister(event_loop);
+		match self.socket.read(&mut buf) {
+			Ok(0) => {
+				println!("Read 0 bytes from socket, shit!");
+			},
+			Ok(n) => {
+				println!("Read {} bytes from socket jdfalfjadfdsa!", n);
+			},
+			Err(e) => {
+				match e.kind() {
+					ErrorKind::WouldBlock => {
+						println!("Socket would block here (session.rs)");
+						// self.reregister(poll);
+						try!(self.reregister(poll));
 					}
-					_ => {
-						self.state = State::Closed;
-					}
+					_ => println!("Error calling write in Session - {}", e)
 				}
-
-			}
-			Ok(Some(n)) => {
-				println!("Read {} bytes", n);
-				println!("{:?}", self.state.get_read_buf());
-				self.state.try_transition_to_writing();
-				self.reregister(event_loop);
-			}
-			Ok(None) => {
-				// Socket would block?
-				self.reregister(event_loop);
-			}
-			Err(e) => {
-				println!("Error calling read in Session - {}", e);
-				self.state = State::Closed;
 			}
 		}
+
+		try!(self.reregister(poll));
+
+		Ok(())
 	}
 
-	fn write(&mut self, event_loop: &mut EventLoop<MqttHandler>) {
-		match self.socket.try_write_buf(self.state.get_mut_write_buf()) {
-			Ok(Some(n)) => {
-				println!("Wrote {} bytes", n);
-				self.state.try_transition_to_reading();
-				self.reregister(event_loop);
-			}
-			Ok(None) => {
-				// Socket would block?
-				self.reregister(event_loop);
-			}
-			Err(e) => {
-				println!("Error calling write in Session - {}", e);
-			}
-		}
+	fn write(&mut self, _: &mut Poll) {
+
 	}
 
-	fn reregister(&mut self, event_loop: &mut EventLoop<MqttHandler>) {
-		let event_set = match self.state {
-			State::Reading(_) => {
-				EventSet::readable()
-			}
-			State::Writing(_) => {
-				EventSet::writable()
-			}
-			_ => {
-				EventSet::none()
-			}
-		};
+	fn reregister(&mut self, poll: &mut Poll) -> io::Result<()> {
+		let mut interest = Ready::readable();
+		interest.insert(Ready::hup());
 
-		match event_loop.reregister(&self.socket, self.token, event_set, PollOpt::edge() | PollOpt::oneshot()) {
-			Ok(_) => {}
-			Err(e) => { println!("Error reregistering connection in event loop for event_set {:?} - {}", event_set, e) }
-		}
+		poll.register(&self.socket, self.token, interest, PollOpt::edge() | PollOpt::oneshot())
+		.or_else(|e| {
+			println!("Failed to reregister {:?}, {:?}", self.token, e);
+			Err(e)
+		})
 	}
 
 	pub fn is_closed(&self) -> bool {

@@ -65,7 +65,7 @@ fn remaining_length_parser(input: &[u8]) -> IResult<&[u8], u32, MqttParseError> 
 					encoded_byte = n;
 				}
 				None => {
-					return IResult::Error(Err::Code(ErrorKind::Custom(MqttParseError::InvalidRemainingLength)));
+					return IResult::Incomplete(Needed::Size(1));
 				}
 			}
 
@@ -96,6 +96,32 @@ named!(pub fixed_header_parser<&[u8], FixedHeader, MqttParseError>,
 		}
 	)
 );
+
+
+// NEW STUFF
+
+enum ParserState {
+	FixedHeader,
+	RemainingLength,
+	VariableHeader,
+	Payload,
+	Invalid
+}
+
+struct MqttParser {
+	state: ParserState
+}
+
+impl MqttParser {
+	fn new() -> MqttParser {
+		MqttParser {
+			state: ParserState::FixedHeader
+		}
+	}
+}
+
+// END NEW STUFF
+
 
 #[test]
 fn test_first_byte_parser() {
@@ -137,8 +163,19 @@ fn test_length() {
 }
 
 #[test]
-fn test_invalid_length() {
+fn test_remaining_length_needs_more() {
 	match remaining_length_parser(&[193, 255, 255]) {
+		IResult::Done(_, _) => {
+			panic!("Expected to need at least one more byte, but it was found to be valid")
+		}
+		IResult::Incomplete(Needed::Size(n)) => assert_eq!(n, 1),
+		e => panic!("{:?}", e)
+	}
+}
+
+#[test]
+fn test_shit() {
+	match remaining_length_parser(&[193, 0xFF, 0xFF, 0xFF, 0xFF]) {
 		IResult::Done(_, _) => {
 			panic!("Expected remaining_length to be invalid, but it was found to be valid")
 		}

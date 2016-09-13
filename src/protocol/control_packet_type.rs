@@ -4,44 +4,44 @@ use super::MqttParseError;
 // 0 and 15 are reserved
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ControlPacketType {
-	Connect = 1,
-	ConnectAck = 2,
-	Publish = 3,
-	PublickAck = 4,
-	PublishReceived = 5,
-	PublishRelease = 6,
-	PublishComplete = 7,
-	Subscribe = 8,
-	SubscribeAck = 9,
-	Unsubscribe = 10,
-	UnsubscribeAck = 11,
-	PingRequest = 12,
-	PingResponse = 13,
-	Disconnect = 14
+	Connect,
+	ConnectAck,
+	Publish,
+	PublickAck,
+	PublishReceived,
+	PublishRelease,
+	PublishComplete,
+	Subscribe,
+	SubscribeAck,
+	Unsubscribe,
+	UnsubscribeAck,
+	PingRequest,
+	PingResponse,
+	Disconnect
 }
 
 impl TryFrom<u8> for ControlPacketType {
 	type Err = MqttParseError;
 
-    fn try_from(original: u8) -> Result<ControlPacketType, MqttParseError> {
-        match original {
-            1 => Ok(ControlPacketType::Connect),
-            2 => Ok(ControlPacketType::ConnectAck),
-            3 => Ok(ControlPacketType::Publish),
-            4 => Ok(ControlPacketType::PublickAck),
-            5 => Ok(ControlPacketType::PublishReceived),
-            6 => Ok(ControlPacketType::PublishRelease),
-            7 => Ok(ControlPacketType::PublishComplete),
-            8 => Ok(ControlPacketType::Subscribe),
-            9 => Ok(ControlPacketType::SubscribeAck),
-            10 => Ok(ControlPacketType::Unsubscribe),
-            11 => Ok(ControlPacketType::UnsubscribeAck),
-            12 => Ok(ControlPacketType::PingRequest),
-            13 => Ok(ControlPacketType::PingResponse),
-            14 => Ok(ControlPacketType::Disconnect),
-            _ => Err(MqttParseError::InvalidControlType)
-        }
-    }	
+	fn try_from(original: u8) -> Result<ControlPacketType, MqttParseError> {
+		match original {
+			1 => Ok(ControlPacketType::Connect),
+			2 => Ok(ControlPacketType::ConnectAck),
+			3 => Ok(ControlPacketType::Publish),
+			4 => Ok(ControlPacketType::PublickAck),
+			5 => Ok(ControlPacketType::PublishReceived),
+			6 => Ok(ControlPacketType::PublishRelease),
+			7 => Ok(ControlPacketType::PublishComplete),
+			8 => Ok(ControlPacketType::Subscribe),
+			9 => Ok(ControlPacketType::SubscribeAck),
+			10 => Ok(ControlPacketType::Unsubscribe),
+			11 => Ok(ControlPacketType::UnsubscribeAck),
+			12 => Ok(ControlPacketType::PingRequest),
+			13 => Ok(ControlPacketType::PingResponse),
+			14 => Ok(ControlPacketType::Disconnect),
+			_ => Err(MqttParseError::InvalidControlType)
+		}
+	}
 }
 
 #[test]

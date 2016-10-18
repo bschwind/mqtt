@@ -31,3 +31,20 @@ impl FixedHeader {
 		}
 	}
 }
+
+pub struct ConnectHeader {
+
+}
+
+pub enum VariableHeader {
+	Connect(ConnectHeader),
+	ConnectAck,
+	Publish,
+
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Header {
+	pub fixed_header: FixedHeader,
+
+}

@@ -7,7 +7,7 @@ pub enum ControlPacketType {
 	Connect,
 	ConnectAck,
 	Publish,
-	PublickAck,
+	PublishAck,
 	PublishReceived,
 	PublishRelease,
 	PublishComplete,
@@ -28,7 +28,7 @@ impl TryFrom<u8> for ControlPacketType {
 			1 => Ok(ControlPacketType::Connect),
 			2 => Ok(ControlPacketType::ConnectAck),
 			3 => Ok(ControlPacketType::Publish),
-			4 => Ok(ControlPacketType::PublickAck),
+			4 => Ok(ControlPacketType::PublishAck),
 			5 => Ok(ControlPacketType::PublishReceived),
 			6 => Ok(ControlPacketType::PublishRelease),
 			7 => Ok(ControlPacketType::PublishComplete),
@@ -54,7 +54,7 @@ fn test_from_u8() {
 	assert_eq!(ControlPacketType::try_from(1).unwrap(), ControlPacketType::Connect);
 	assert_eq!(ControlPacketType::try_from(2).unwrap(), ControlPacketType::ConnectAck);
 	assert_eq!(ControlPacketType::try_from(3).unwrap(), ControlPacketType::Publish);
-	assert_eq!(ControlPacketType::try_from(4).unwrap(), ControlPacketType::PublickAck);
+	assert_eq!(ControlPacketType::try_from(4).unwrap(), ControlPacketType::PublishAck);
 	assert_eq!(ControlPacketType::try_from(5).unwrap(), ControlPacketType::PublishReceived);
 	assert_eq!(ControlPacketType::try_from(6).unwrap(), ControlPacketType::PublishRelease);
 	assert_eq!(ControlPacketType::try_from(7).unwrap(), ControlPacketType::PublishComplete);

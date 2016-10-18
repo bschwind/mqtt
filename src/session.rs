@@ -1,4 +1,5 @@
 use super::session_state::{State};
+use super::parser::MqttConsumer;
 
 use std::io;
 use std::io::{ErrorKind, Read};
@@ -10,7 +11,8 @@ use mio::{Poll, PollOpt, Ready, Token};
 pub struct Session {
 	pub socket: TcpStream,
 	pub token: Token,
-	pub state: State
+	pub state: State,
+	pub mqtt_consumer: MqttConsumer
 }
 
 impl Session {
@@ -18,7 +20,8 @@ impl Session {
 		Session {
 			socket: socket,
 			token: token,
-			state: State::Reading
+			state: State::Reading,
+			mqtt_consumer: MqttConsumer::new()
 		}
 	}
 
@@ -55,13 +58,14 @@ impl Session {
 			},
 			Ok(n) => {
 				println!("Read {} bytes from socket jdfalfjadfdsa!", n);
+				self.mqtt_consumer.feed_bytes(&buf[0..n]);
 			},
 			Err(e) => {
 				match e.kind() {
 					ErrorKind::WouldBlock => {
 						println!("Socket would block here (session.rs)");
 						// self.reregister(poll);
-						try!(self.reregister(poll));
+						// try!(self.reregister(poll));
 					}
 					_ => println!("Error calling write in Session - {}", e)
 				}

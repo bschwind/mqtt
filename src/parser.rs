@@ -1,30 +1,11 @@
+use std::str;
 use std::convert::TryFrom;
-use nom::{ErrorKind, Needed, IResult};
+use nom::{be_u8, be_u16, Consumer, ConsumerState, ErrorKind, Input, MemProducer, Move, Needed, Producer, IResult};
 use nom::Err;
+use nom::Err::NodePosition;
+use nom::ErrorKind::Custom;
 
-use protocol::{ControlPacketType, MqttParseError, FixedHeader};
-
-#[derive(Clone, Debug, PartialEq)]
-struct FirstByteData {
-	control_type: ControlPacketType,
-	bit_0: bool,
-	bit_1: bool,
-	bit_2: bool,
-	bit_3: bool
-}
-
-impl FixedHeader {
-	fn from_first_byte_data(first_byte: FirstByteData, remaining_length: u32) -> FixedHeader {
-		FixedHeader {
-			control_type: first_byte.control_type,
-			bit_0: first_byte.bit_0,
-			bit_1: first_byte.bit_1,
-			bit_2: first_byte.bit_2,
-			bit_3: first_byte.bit_3,
-			remaining_length: remaining_length
-		}
-	}
-}
+use protocol::{ConnectVariableHeader, ConnectPayload, ControlPacketType, MqttParseError, FixedHeader, FirstByteData, VariableHeader, Payload};
 
 fn first_byte_parser(input: &[u8]) -> IResult<&[u8], FirstByteData, MqttParseError> {
 	if input.len() < 1 {
@@ -97,30 +78,216 @@ named!(pub fixed_header_parser<&[u8], FixedHeader, MqttParseError>,
 	)
 );
 
+named!(pub length_prefixed_utf8_parser<&[u8], &str, MqttParseError>,
+	chain!(
+		length: fix_error!(MqttParseError, be_u16) ~
+		valid_str: add_error!(
+			ErrorKind::Custom(MqttParseError::InvalidUTF8Sequence),
+			fix_error!(
+				MqttParseError,
+				map_res!(take!(length), str::from_utf8)
+			)
+		),
+		|| {
+			valid_str
+		}
+	)
+);
 
-// NEW STUFF
+named!(pub length_prefixed_byte_array<&[u8], &[u8], MqttParseError>,
+	chain!(
+		length: fix_error!(MqttParseError, be_u16) ~
+		valid_str: fix_error!(MqttParseError, take!(length)),
+		|| {
+			valid_str
+		}
+	)
+);
+
+// Connect Variable Header parser stuff
+named!(pub connect_variable_header_parser<&[u8], VariableHeader, MqttParseError>,
+	chain!(
+		protocol_name: length_prefixed_utf8_parser ~
+		protocol_level: fix_error!(MqttParseError, be_u8) ~
+		connect_flags: fix_error!(MqttParseError, be_u8) ~
+		keep_alive: fix_error!(MqttParseError, be_u16),
+		|| {
+			VariableHeader::Connect(ConnectVariableHeader {
+				protocol_name: protocol_name.into(),
+				protocol_level: protocol_level,
+				connect_flags: connect_flags,
+				keep_alive: keep_alive
+			})
+		}
+	)
+);
+
+named!(pub connect_payload_parser<&[u8], Payload, MqttParseError>,
+	chain!(
+		protocol_name: length_prefixed_utf8_parser ~
+		protocol_level: fix_error!(MqttParseError, be_u8) ~
+		connect_flags: fix_error!(MqttParseError, be_u8) ~
+		keep_alive: fix_error!(MqttParseError, be_u16),
+		|| {
+			Payload::Connect(ConnectPayload {
+				client_id: "hi".into(),
+				will_topic: None,
+				will_message: None,
+				username: None,
+				password: None
+			})
+		}
+	)
+);
+
+named!(pub connect_packet_parser<&[u8], (VariableHeader, Payload), MqttParseError>,
+	chain!(
+		variable_header: connect_variable_header_parser ~
+		payload: connect_payload_parser,
+		|| {
+			(variable_header, payload)
+		}
+	)
+);
+
+
+// Nom Consumer test
 
 enum ParserState {
-	FixedHeader,
-	RemainingLength,
-	VariableHeader,
-	Payload,
+	ReadingFixedHeader,
+	ReadingVariableHeader,
+	ReadingPayload,
 	Invalid
 }
 
-struct MqttParser {
-	state: ParserState
+type MqttConsumerState = ConsumerState<FixedHeader, (), Move>;
+
+pub struct MqttConsumer {
+	state: ParserState,
+	consumer_state: MqttConsumerState,
+	fixed_header: Option<FixedHeader>
 }
 
-impl MqttParser {
-	fn new() -> MqttParser {
-		MqttParser {
-			state: ParserState::FixedHeader
+impl MqttConsumer {
+	pub fn new() -> MqttConsumer {
+		MqttConsumer {
+			state: ParserState::ReadingFixedHeader,
+			consumer_state: ConsumerState::Continue(Move::Consume(0)),
+			fixed_header: None
+		}
+	}
+
+	pub fn feed_bytes(&mut self, bytes: &[u8]) -> () {
+		let mut producer = MemProducer::new(bytes, bytes.len());
+
+		println!("Got {} bytes fed to me!", bytes.len());
+
+		while let &ConsumerState::Continue(_) = producer.apply(self) {
+			// Do nothing
 		}
 	}
 }
 
-// END NEW STUFF
+impl<'a> Consumer<&'a[u8], FixedHeader, (), Move> for MqttConsumer {
+	fn state(&self) -> &MqttConsumerState {
+		&self.consumer_state
+	}
+
+	fn handle(&mut self, input: Input<&'a[u8]>) -> &MqttConsumerState {
+		// TODO - update state based on input
+
+		match self.state {
+			ParserState::ReadingFixedHeader => {
+				println!("In Header state!");
+
+				match input {
+					Input::Empty | Input::Eof(None) => {
+						self.state = ParserState::Invalid;
+						self.consumer_state = ConsumerState::Error(());
+					}
+					Input::Element(slice) | Input::Eof(Some(slice)) => {
+						match fixed_header_parser(slice) {
+							IResult::Error(_) => {
+								self.state = ParserState::Invalid;
+								self.consumer_state = ConsumerState::Error(());
+							}
+							IResult::Incomplete(n) => {
+								self.consumer_state = ConsumerState::Continue(Move::Await(n));
+							}
+							IResult::Done(_, fixed_header) => {
+								self.fixed_header = Some(fixed_header);
+								self.state = ParserState::ReadingVariableHeader;
+							}
+						}
+					}
+				}
+			}
+			ParserState::ReadingVariableHeader => {
+				println!("Fixed header is {:?}", self.fixed_header);
+
+				if let Some(ref fixed_header) = self.fixed_header {
+					match fixed_header.control_type {
+						ControlPacketType::Connect => {
+							println!("WE GOT A CONNECT PACKET!");
+
+						}
+						ControlPacketType::ConnectAck => {
+
+						}
+						ControlPacketType::Publish => {
+
+						}
+						ControlPacketType::PublishAck => {
+
+						}
+						ControlPacketType::PublishReceived => {
+
+						}
+						ControlPacketType::PublishRelease => {
+
+						}
+						ControlPacketType::PublishComplete => {
+
+						}
+						ControlPacketType::Subscribe => {
+
+						}
+						ControlPacketType::SubscribeAck => {
+
+						}
+						ControlPacketType::Unsubscribe => {
+
+						}
+						ControlPacketType::UnsubscribeAck => {
+
+						}
+						ControlPacketType::PingRequest => {
+
+						}
+						ControlPacketType::PingResponse => {
+
+						}
+						ControlPacketType::Disconnect => {
+
+						}
+					}
+				}
+				// println!("");
+				// println!("In Payload state!");
+			}
+			ParserState::ReadingPayload => {
+				// println!("Reading Payload!")
+			}
+			ParserState::Invalid => {
+				// println!("In Invalid state!")
+			}
+		}
+
+		&self.consumer_state
+	}
+}
+
+// End Nom Consumer test
 
 
 #[test]
@@ -174,7 +341,7 @@ fn test_remaining_length_needs_more() {
 }
 
 #[test]
-fn test_shit() {
+fn test_invalid_remaining_length() {
 	match remaining_length_parser(&[193, 0xFF, 0xFF, 0xFF, 0xFF]) {
 		IResult::Done(_, _) => {
 			panic!("Expected remaining_length to be invalid, but it was found to be valid")
@@ -185,13 +352,13 @@ fn test_shit() {
 }
 
 #[test]
-fn test_header_parser() {
-	let test_input = &[16, 30];
-	let output = fixed_header_parser(test_input);
+fn test_fixed_header_parser() {
+	let test_input = vec!(0x10, 0x1E);
+	let output = fixed_header_parser(&test_input);
 
 	match output {
 		IResult::Done(i, o) => {
-			assert_eq!(i, &[]);
+			// assert_eq!(i, &[]);
 
 			assert_eq!(o, FixedHeader {
 				control_type: ControlPacketType::Connect,
@@ -202,6 +369,57 @@ fn test_header_parser() {
 				remaining_length: 30
 			})
 		}
-		_ => panic!()
+		IResult::Incomplete(e) => panic!("Input was incomplete: {:?}", e),
+		IResult::Error(Err::Code(ErrorKind::Custom(e))) => assert_eq!(e, MqttParseError::InvalidRemainingLength),
+		IResult::Error(e) => panic!("Error: {:?}", e)
+	}
+}
+
+#[test]
+fn test_utf8_parser_valid() {
+	// The UTF-8 sequence "A"
+	let test_input = vec!(0x00, 0x01, 0x41);
+
+	match length_prefixed_utf8_parser(&test_input) {
+		IResult::Done(i, o) => {
+			assert_eq!(o, "A");
+		}
+		e => panic!("{:?}", e)
+	}
+}
+
+#[test]
+fn test_utf8_parser_invalid() {
+	// 0xDFFF is an invalid UTF-8 sequence
+	let test_input = vec!(0x00, 0x02, 0xDF, 0xFF);
+
+	match length_prefixed_utf8_parser(&test_input) {
+		IResult::Done(i, o) => {
+			panic!("Expected invalid UTF8 but parser claims it's valid");
+		}
+		IResult::Error(NodePosition(Custom(e), _, _)) => assert_eq!(e, MqttParseError::InvalidUTF8Sequence),
+		e => panic!("{:?}", e)
+	}
+}
+
+#[test]
+fn test_connect_variable_header_parser() {
+	let test_input = vec!(
+		0x00, 0x04, b'M', b'Q', b'T', b'T', // Protocol Name
+		0x04, // Protocol Level
+		0x00, // Connect Flags
+		0x00, 0x3C // Keep alive time - 60 seconds
+	);
+
+	match connect_variable_header_parser(&test_input) {
+		IResult::Done(i, o) => {
+			assert_eq!(o, VariableHeader::Connect(ConnectVariableHeader {
+				protocol_name: "MQTT".into(),
+				protocol_level: 4,
+				connect_flags: 0,
+				keep_alive: 60
+			}));
+		}
+		e => panic!("{:?}", e)
 	}
 }

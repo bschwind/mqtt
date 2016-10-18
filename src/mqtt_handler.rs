@@ -67,7 +67,7 @@ impl MqttHandler {
 							None => {
 								return Err(MqttError::TooManyConnections);
 							}
-						};
+						}
 
 						Ok(())
 					}
@@ -146,22 +146,12 @@ impl MqttHandler {
 			for event in &events {
 				match self.handle_event(poll, event) {
 					Ok(_) => (),
-					Err(e) => {
-						match e {
-							MqttError::Io(e) => println!("Encountered IO error: {:?}", e),
-							MqttError::TooManyConnections => println!("Too many connections for the server to handle!")
-						}
-					}
+					Err(MqttError::Io(e)) => println!("Encountered IO error: {:?}", e),
+					Err(MqttError::TooManyConnections) => println!("Too many connections for the server to handle!")
 				}
 			}
 
 			println!("Tick!");
 		}
 	}
-}
-
-// TODO - Implement tests
-#[test]
-fn lol() -> () {
-	assert_eq!(1 + 1, 2);
 }

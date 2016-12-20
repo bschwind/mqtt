@@ -14,3 +14,17 @@ pub enum MqttParseError {
 	InvalidRemainingLength,
 	InvalidUTF8Sequence
 }
+
+pub enum MQTTQoS {
+	AtMostOnce,
+	AtLeastOnce,
+	ExactlyOne
+}
+
+pub struct MQTTPacket {
+	pub control_type: ControlPacketType,
+	pub qos: Option<MQTTQoS>,
+	pub remaining_length: u32,
+	pub variable_header: Option<VariableHeader>,
+	pub payload: Vec<u8>
+}

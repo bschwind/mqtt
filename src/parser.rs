@@ -5,7 +5,92 @@ use nom::{be_u8, be_u16, Consumer, ConsumerState, ErrorKind, Input, MemProducer,
 use nom::Err;
 use nom::Err::NodePosition;
 use nom::ErrorKind::Custom;
-use protocol::{ConnectVariableHeader, ConnectPayload, ControlPacketType, MqttParseError, FixedHeader, FirstByteData, VariableHeader, Payload};
+use protocol::{ConnectVariableHeader, ConnectPayload, ControlPacketType, MqttParseError, FixedHeader, FirstByteData, VariableHeader, Payload, MQTTPacket};
+
+
+pub struct ReadBuffer {
+	pub buf: Vec<u8>,
+	count: u32 // TODO - Use usize if you want large buffers
+}
+
+impl ReadBuffer {
+	pub fn new(buf: Vec<u8>) -> ReadBuffer {
+		ReadBuffer {
+			buf: buf,
+			count: 0
+		}
+	}
+
+	pub fn advance(&mut self, n: u32) {
+		self.count += n;
+	}
+}
+
+
+pub enum ReadState {
+	Idle,
+	FixedHeader,
+	VariableHeader,
+	Payload,
+	Disconnect // TODO - Disconnect should have a reason for disconnection
+}
+
+pub struct MqttReader {
+	buffer: ReadBuffer,
+	state: ReadState,
+	packet: MQTTPacket
+}
+
+impl MqttReader {
+	pub fn process(&mut self, input: Vec<u8>, bytes_read: u32) {
+		if bytes_read == 0 {
+			self.state = ReadState::Disconnect;
+		} else {
+			self.state = ReadState::FixedHeader;
+		}
+
+		loop {
+			match self.state {
+				ReadState::FixedHeader => {
+					let first_byte = self.buffer.buf[0];
+
+					match ControlPacketType::try_from(((first_byte & 0b11110000) >> 4)) {
+						Ok(control_type) => {
+							self.packet.control_type = control_type;
+						}
+						Err(_) => {}
+					}
+
+					self.packet.qos = None;
+					// TODO - Read remaining length
+					self.packet.remaining_length = self.buffer.buf[1] as u32;
+
+					self.state = ReadState::VariableHeader;
+				}
+				ReadState::VariableHeader => {
+
+				}
+				ReadState::Payload => {}
+				ReadState::Disconnect => {}
+				_ => {}
+			}
+		}
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

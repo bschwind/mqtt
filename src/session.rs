@@ -1,5 +1,5 @@
 use super::session_state::{State};
-use super::parser::MqttConsumer;
+use super::parser::{MqttConsumer, MqttParser};
 
 use std::io;
 use std::io::{ErrorKind, Read};
@@ -12,6 +12,7 @@ pub struct Session {
 	pub socket: TcpStream,
 	pub token: Token,
 	pub state: State,
+	pub parser: MqttParser,
 	pub mqtt_consumer: MqttConsumer
 }
 
@@ -21,12 +22,13 @@ impl Session {
 			socket: socket,
 			token: token,
 			state: State::Reading,
+			parser: MqttParser::new(),
 			mqtt_consumer: MqttConsumer::new()
 		}
 	}
 
 	pub fn handle_event(&mut self, poll: &mut Poll, event_type: Ready) -> io::Result<()> {
-		println!("Session is ready for these events: {:?}", event_type);
+		println!("Session ({:?}) is ready for these events: {:?}", self.token, event_type);
 
 		match self.state {
 			State::Reading => {
@@ -58,7 +60,8 @@ impl Session {
 			},
 			Ok(n) => {
 				println!("Read {} bytes from socket jdfalfjadfdsa!", n);
-				self.mqtt_consumer.feed_bytes(&buf[0..n]);
+				// self.mqtt_consumer.feed_bytes(&buf[0..n]);
+				self.parser.feed_bytes(&buf[0..n]);
 			},
 			Err(e) => {
 				match e.kind() {

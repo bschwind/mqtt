@@ -23,7 +23,7 @@ impl MqttHandler {
 	pub fn new(socket: TcpListener) -> MqttHandler {
 		MqttHandler {
 			socket: socket,
-			sessions: Slab::with_capacity(2)
+			sessions: Slab::with_capacity(2) // TODO - this is obviously low so I handle running out of connections
 		}
 	}
 }

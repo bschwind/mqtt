@@ -15,12 +15,14 @@ pub enum MqttParseError {
 	InvalidUTF8Sequence
 }
 
+#[derive(Debug)]
 pub enum MQTTQoS {
 	AtMostOnce,
 	AtLeastOnce,
 	ExactlyOne
 }
 
+#[derive(Debug)]
 pub struct MQTTPacket {
 	pub control_type: ControlPacketType,
 	pub qos: Option<MQTTQoS>,
